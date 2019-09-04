@@ -1,69 +1,51 @@
-import gym
-import optuna
-import pandas as pd
-import numpy as np
+import os
+import sys
+import warnings
 
-from stable_baselines.common.policies import MlpLnLstmPolicy
-from stable_baselines.common.vec_env import SubprocVecEnv, DummyVecEnv
-from stable_baselines import A2C, ACKTR, PPO2
+def warn(*args, **kwargs):
+    pass
 
-from env.TradingEnv import TradingEnv
-from util.indicators import add_indicators
+warnings.warn = warn
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-study = optuna.load_study(study_name='ppo2_calmar',
-                          storage='sqlite:///params.db')
-params = study.best_trial.params
+sys.path.append(os.path.dirname(os.path.abspath('')))
 
-print("Training PPO2 agent with params:", params)
-print("Best trial:", study.best_trial.value)
+from environments import TradingEnvironment
+from exchanges.simulated import FBMExchange
+from actions import DiscreteActionStrategy
+from rewards import SimpleProfitStrategy
 
-df = pd.read_csv('./data/coinbase_hourly.csv')
-df = df.drop(['Symbol'], axis=1)
-df = df.sort_values(['Date'])
-df = add_indicators(df.reset_index())
+exchange = FBMExchange()
+action_strategy = DiscreteActionStrategy()
+reward_strategy = SimpleProfitStrategy()
 
-test_len = int(len(df) * 0.2)
-train_len = int(len(df)) - test_len
+env = TradingEnvironment(exchange=exchange,
+                         action_strategy=action_strategy,
+                         reward_strategy=reward_strategy)
 
-train_df = df[:train_len]
-test_df = df[train_len:]
+obs = env.reset()
+sell_price = 1e9
+stop_price = -1
 
-train_env = DummyVecEnv([lambda: TradingEnv(
-    train_df, reward_func="calmar", forecast_len=int(params['forecast_len']), confidence_interval=params['confidence_interval'])])
+print('Initial portfolio: ', exchange.portfolio)
 
-test_env = DummyVecEnv([lambda: TradingEnv(
-    test_df, reward_func="calmar", forecast_len=int(params['forecast_len']), confidence_interval=params['confidence_interval'])])
-
-model_params = {
-    'n_steps': int(params['n_steps']),
-    'gamma': params['gamma'],
-    'learning_rate': params['learning_rate'],
-    'ent_coef': params['ent_coef'],
-    'cliprange': params['cliprange'],
-    'noptepochs': int(params['noptepochs']),
-    'lam': params['lam'],
-}
-
-curr_idx = -1
-model = PPO2(MlpLnLstmPolicy, train_env, verbose=0, nminibatches=1,
-            tensorboard_log="./tensorboard", **model_params)
-
-# curr_idx = 2
-# model = PPO2.load('./agents/ppo2_calmar_' + str(curr_idx) + '.pkl', env=train_env)
-
-for idx in range(curr_idx + 1, 5):
-    print('[', idx, '] Training for: ', train_len, ' time steps')
-
-    model.learn(total_timesteps=train_len)
-
-    obs = test_env.reset()
-    done, reward_sum = False, 0
-
-    while not done:
-        action, _states = model.predict(obs)
-        obs, reward, done, info = test_env.step(action)
-        reward_sum += reward
-
-    print('[', idx, '] Total reward: ', reward_sum, ' (calmar)')
-    model.save('./agents/ppo2_calmar_' + str(idx) + '.pkl')
+for i in range(1000):
+    action = 0 if obs['close'] < sell_price else 18
+    action = 19 if obs['close'] < stop_price else action
+    
+    if i == 0 or portfolio['BTC'] == 0:
+        action = 16
+        sell_price = obs['close'] + (obs['close'] / 50)
+        stop_price = obs['close'] - (obs['close'] / 50)
+    
+    obs, reward, done, info = env.step(action)
+    executed_trade = info['executed_trade']
+    filled_trade = info['filled_trade']
+    portfolio = exchange.portfolio
+    
+    print('Obs: ', obs)
+    print('Reward: ', reward)
+    print('Portfolio: ', portfolio)
+    print('Trade executed: ', executed_trade.trade_type, executed_trade.price, executed_trade.amount)
+    print('Trade filled: ', filled_trade.trade_type, filled_trade.price, filled_trade.amount)

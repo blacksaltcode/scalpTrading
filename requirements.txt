@@ -1,14 +1,1 @@
-numpy
-pandas
-sklearn
-matplotlib
-gym
-stable_baselines
-alpha_vantage
-mpl-finance
-optuna
-ta
-statsmodels
-patsy
-empyrical
-tensorflow
+pyarrow
