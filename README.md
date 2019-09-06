@@ -1,2 +1,2 @@
-# rl-scalp-trading
+# scalpTrading
 This is project for MLND 
